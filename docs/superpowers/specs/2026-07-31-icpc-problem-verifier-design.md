@@ -52,7 +52,7 @@ problem-verifier/
 │   ├── publish-image.yml            # judge image build/push
 │   └── selftest.yml                 # fixture 대상 자체 검증
 ├── image/
-│   ├── Dockerfile                   # ghcr.io/<org>/icpc-judge
+│   ├── Dockerfile                   # ghcr.io/suckzoo/icpc-judge
 │   ├── bench/bench.c                # machine factor benchmark
 │   └── languages/{cpp,c,java,python}.sh
 ├── src/icpc_verify/                 # python 본체
@@ -82,7 +82,7 @@ on:
 
 jobs:
   verify:
-    uses: <org>/problem-verifier/.github/workflows/verify.yml@v1
+    uses: suckzoo/problem-verifier/.github/workflows/verify.yml@v1
     with:
       full: ${{ inputs.full == true }}
 ```
@@ -207,7 +207,7 @@ judge job 시작 시 순서대로 수행한다.
 
 | runner | 결과 |
 |---|---|
-| 2 vCPU (hosted 기본) | 두 vCPU가 같은 core다. sibling을 끄면 runner agent와 docker가 같은 CPU로 몰린다. best-effort다. 리포트에 경고를 남긴다. |
+| 2 vCPU (hosted 기본) | 두 vCPU가 같은 core다. offline을 하지 않고 `cpu1`에 pin만 한다. HT 간섭이 남으므로 best-effort다. 리포트에 경고를 남긴다. |
 | 4 vCPU 이상 | `cpu2`를 judge용으로 쓰고 `cpu3`를 끈다. runner agent는 `cpu0/1`에 남는다. 실질적 격리가 된다. |
 | self-hosted | 위와 같다. host에서 SMT를 꺼두면 더 깨끗하다. 설정 가이드를 문서에 넣는다. |
 
@@ -234,7 +234,7 @@ docker run --rm \
   --cap-drop=ALL --security-opt=no-new-privileges \
   --read-only --tmpfs /work:rw,size=512m,exec \
   -v <run dir>:/run:ro -v <out dir>:/out:rw \
-  ghcr.io/<org>/icpc-judge@sha256:...
+  ghcr.io/suckzoo/icpc-judge@sha256:...
   /usr/local/bin/runner.py ...
 ```
 
@@ -281,7 +281,7 @@ base는 `ubuntu:24.04`이며 버전을 image에 고정한다.
   `include/` 가 있으면 그 내용을 build 디렉토리에 함께 복사한다.
 - 언어 판별은 solution 디렉토리 안 소스 확장자로 한다. 두 언어가 섞이면 `compiler_error`다.
 
-image는 `.github/workflows/publish-image.yml`이 `ghcr.io/<org>/icpc-judge`에 push한다.
+image는 `.github/workflows/publish-image.yml`이 `ghcr.io/suckzoo/icpc-judge`에 push한다.
 action은 tag가 아닌 **digest**로 pull한다. digest는 action repo에 커밋된 파일에 박아둔다.
 `judge-image` input으로 교체할 수 있다.
 
