@@ -28,11 +28,12 @@ def make_problem(tmp_path, rel, text):
 
 def make_work(tmp_path):
     # pytest's tmp_path defaults to 0700; --cap-drop ALL removes CAP_DAC_OVERRIDE, so the
-    # containerized root can't bypass that. Open up the bind-mounted directory so the rw
-    # mount is actually usable instead of failing on host directory permissions.
+    # containerized root can't bypass host directory permissions. This bind mount is rw and
+    # the container writes new files (binaries, .class, __pycache__) directly into it, so
+    # "other" needs write access too, not just read/traverse.
     work = tmp_path / "work"
     work.mkdir()
-    work.chmod(0o755)
+    work.chmod(0o777)
     return work
 
 
