@@ -1,4 +1,40 @@
-from icpc_verify.sandbox import _parse_oom_killed
+from pathlib import Path
+
+from icpc_verify.sandbox import SandboxSpec, _build_run_argv, _parse_oom_killed
+
+
+def _spec(**overrides):
+    base = dict(
+        image="icpc-judge:test",
+        cpuset=0,
+        memory_mib=256,
+        binds=(),
+        argv=("true",),
+        timeout=5.0,
+        user=None,
+        workdir=None,
+    )
+    base.update(overrides)
+    return SandboxSpec(**base)
+
+
+def test_workdir_none_omits_dash_w():
+    argv = _build_run_argv(_spec(), "test-name")
+    assert "-w" not in argv
+
+
+def test_workdir_set_adds_dash_w_flag():
+    argv = _build_run_argv(_spec(workdir="/validator"), "test-name")
+    assert "-w" in argv
+    assert argv[argv.index("-w") + 1] == "/validator"
+
+
+def test_binds_and_image_argv_come_after_workdir(tmp_path: Path):
+    argv = _build_run_argv(
+        _spec(workdir="/validator", binds=((tmp_path, "/validator", "ro"),)), "test-name"
+    )
+    assert argv.index("-w") < argv.index("-v")
+    assert argv[-2:] == ["icpc-judge:test", "true"]
 
 
 def test_true_when_oom_killed_is_true():

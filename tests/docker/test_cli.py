@@ -93,6 +93,14 @@ def test_missing_problem_yaml_exits_two(tmp_path):
     assert "problem.yaml" in proc.stderr
 
 
+def test_custom_problem_judges_through_cli(tmp_path):
+    proc, payload = run_cli(
+        tmp_path, "accepted/main.cpp", problem_dir=ROOT / "tests" / "fixtures" / "custom"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert payload["verdict"] == "accepted"
+
+
 def test_result_json_shape(tmp_path):
     _, payload = run_cli(tmp_path, "accepted/main.cpp")
     assert set(payload) >= {

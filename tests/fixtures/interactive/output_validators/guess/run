@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+import sys
+
+secret = int(open(sys.argv[1]).read())
+feedback = sys.argv[3]
+count = 0
+for line in sys.stdin:
+    count += 1
+    if count > 100:
+        print("too many guesses", file=open(f"{feedback}/judgemessage.txt", "w"))
+        raise SystemExit(43)
+    try:
+        guess = int(line)
+    except ValueError:
+        print("malformed guess", file=open(f"{feedback}/judgemessage.txt", "w"))
+        raise SystemExit(43)
+    if guess == secret:
+        print("correct", flush=True)
+        raise SystemExit(42)
+    print("higher" if guess < secret else "lower", flush=True)
+print("gave up before guessing", file=open(f"{feedback}/judgemessage.txt", "w"))
+raise SystemExit(43)
