@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .sandbox import SandboxSpec, run_sandbox
+from .sandbox import SandboxSpec, host_user, run_sandbox
 from .solutions import Language, Solution
 
 WORK_MOUNT = "/work"
@@ -72,6 +72,7 @@ def compile_solution(
                 *sources,
             ),
             timeout=options.timeout,
+            user=host_user(),
         )
     )
 
@@ -95,6 +96,7 @@ def compile_solution(
                 str(memory_mib),
             ),
             timeout=30.0,
+            user=host_user(),
         )
     )
     if run_result.exit_code != 0:
