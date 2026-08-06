@@ -1,7 +1,7 @@
 """solution 하나를 testcase 전체에 대해 채점한다.
 
 testcase 1회 = container 1개다. 기본은 lazy judging 이고 첫 비 AC 에서 멈춘다.
-이 모듈은 validation: default 만 다룬다. custom/interactive 는 계획 2 다.
+validation: custom 은 이 모듈이 다룬다. custom interactive 는 계획 2 Task 5 다.
 """
 
 from __future__ import annotations
@@ -16,12 +16,13 @@ from pathlib import Path
 from . import verdicts
 from .compare import compare_output, parse_compare_flags
 from .compile import CompileOptions, compile_solution
-from .problemcfg import ProblemConfig
+from .problemcfg import ProblemConfig, ValidationMode
 from .results import RunMeasurement, SolutionResult, TestCaseResult, classify_run, solution_verdict
 from .sandbox import SandboxSpec, host_user, run_sandbox
 from .solutions import Language, Solution
 from .testdata import TestCase
 from .timelimits import TimeLimits
+from .validators import ValidatorError, build_validator, run_custom_validator
 
 RUN_MOUNT = "/run"
 OUT_MOUNT = "/out"
@@ -91,11 +92,13 @@ def _run_one_testcase(
     io_dir: Path,
     limits: TimeLimits,
     options: JudgeOptions,
-) -> tuple[RunMeasurement | None, bytes, str]:
-    """(측정값, team 출력, stderr 요약) 을 돌려준다.
+) -> tuple[RunMeasurement | None, bytes, Path, str]:
+    """(측정값, team 출력, team 출력 경로, stderr 요약) 을 돌려준다.
 
     측정값이 None 이면 run.json 을 만들지 못한 것이다 (judge_error). 그 경우 stderr
     요약 자리에는 _describe_missing_run_result 가 만든 진단 메시지가 들어간다.
+    team 출력 경로는 항상 존재한다 (출력이 없으면 빈 파일을 만든다) - custom validator
+    가 그 경로를 그대로 마운트해서 읽기 때문이다.
     """
     run_dir = io_dir / "in"
     out_dir = io_dir / "out"
@@ -144,7 +147,7 @@ def _run_one_testcase(
 
     result_file = out_dir / "run.json"
     if not result_file.is_file():
-        return None, b"", _describe_missing_run_result(result.stderr)
+        return None, b"", out_dir / "stdout", _describe_missing_run_result(result.stderr)
 
     raw = json.loads(result_file.read_text(encoding="utf-8"))
     measurement = RunMeasurement(
@@ -159,13 +162,17 @@ def _run_one_testcase(
     )
 
     stdout_path = out_dir / "stdout"
-    team_output = stdout_path.read_bytes() if stdout_path.is_file() else b""
+    if stdout_path.is_file():
+        team_output = stdout_path.read_bytes()
+    else:
+        team_output = b""
+        stdout_path.write_bytes(b"")
     stderr_path = out_dir / "stderr"
     stderr_text = ""
     if stderr_path.is_file():
         data = stderr_path.read_bytes()[:STDERR_KEEP_BYTES]
         stderr_text = data.decode("utf-8", errors="replace")
-    return measurement, team_output, stderr_text
+    return measurement, team_output, stdout_path, stderr_text
 
 
 def judge_solution(
@@ -210,7 +217,30 @@ def judge_solution(
         ]
         return result
 
-    compare_flags = parse_compare_flags(config.validator_flags)
+    validator = None
+    if config.validation is ValidationMode.CUSTOM:
+        assert config.validator_dir is not None
+        try:
+            validator = build_validator(
+                config.validator_dir,
+                work_root,
+                image=options.image,
+                cpuset=options.cpuset,
+            )
+        except ValidatorError as exc:
+            result.verdict = verdicts.JUDGE_ERROR
+            result.compile_log = f"{result.compile_log}\n[validator] {exc}".strip()
+            result.testcases = [
+                TestCaseResult(c.id, c.group, verdicts.NOT_RUN, 0.0, 0.0, 0, 0, "")
+                for c in testcases
+            ]
+            return result
+
+    compare_flags = (
+        parse_compare_flags(config.validator_flags)
+        if config.validation is ValidationMode.DEFAULT
+        else None
+    )
     stopped = False
     for case in testcases:
         if stopped:
@@ -219,7 +249,7 @@ def judge_solution(
             )
             continue
 
-        measurement, team_output, stderr_text = _run_one_testcase(
+        measurement, team_output, team_output_path, stderr_text = _run_one_testcase(
             case, outcome.run_argv, work_dir, io_dir, limits, options
         )
         if measurement is None:
@@ -239,10 +269,27 @@ def judge_solution(
                 stopped = True
             continue
 
-        compare_ok, compare_message = compare_output(
-            team_output, case.answer_path.read_bytes(), compare_flags
-        )
-        verdict, message = classify_run(measurement, limits, compare_ok, compare_message)
+        if validator is not None:
+            # 실행 자체의 건강 상태(TLE/RTE/OLE)를 먼저 판정하고,
+            # 깨끗할 때만 validator 에게 출력을 묻는다 (spec §6.3 의 순서).
+            verdict, message = classify_run(measurement, limits, True, "")
+            if verdict == verdicts.ACCEPTED:
+                verdict, message = run_custom_validator(
+                    validator,
+                    input_path=case.input_path,
+                    answer_path=case.answer_path,
+                    team_output_path=team_output_path,
+                    feedback_dir=io_dir / "feedback",
+                    flags=config.validator_flags,
+                    image=options.image,
+                    cpuset=options.cpuset,
+                    timeout=limits.hard_kill + 30.0,
+                )
+        else:
+            compare_ok, compare_message = compare_output(
+                team_output, case.answer_path.read_bytes(), compare_flags
+            )
+            verdict, message = classify_run(measurement, limits, compare_ok, compare_message)
         if stderr_text and verdict == verdicts.RUN_TIME_ERROR:
             message = f"{message}\nstderr: {stderr_text}"
 

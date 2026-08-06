@@ -1,0 +1,6 @@
+problem_format_version: 2023-07-draft
+name: Sum Pair
+type: pass-fail
+limits:
+  time_limit: 1.0
+  memory: 512

@@ -70,9 +70,9 @@ def run_judge(args: argparse.Namespace) -> int:
         default_time_limit=args.default_time_limit,
         default_memory_mib=args.default_memory_mib,
     )
-    if config.validation is not ValidationMode.DEFAULT:
+    if config.validation is ValidationMode.CUSTOM_INTERACTIVE:
         raise ProblemConfigError(
-            f"validation: {config.validation.value} 는 아직 지원하지 않습니다 (계획 2)"
+            f"validation: {config.validation.value} 는 아직 지원하지 않습니다 (계획 2 Task 5)"
         )
     limits = make_time_limits(config.time_limit, args.timelimit_overshoot)
     testcases = collect_testcases(problem_dir)
