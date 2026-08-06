@@ -29,17 +29,18 @@ class CompileOutcome:
     run_argv: tuple[str, ...]
 
 
-def _stage_sources(solution: Solution, work_dir: Path) -> list[str]:
-    """소스를 work_dir 로 복사하고 container 안의 경로 목록을 돌려준다."""
+def _stage_sources(solution: Solution, work_dir: Path, mount: str = WORK_MOUNT) -> list[str]:
+    """소스를 work_dir 로 복사하고 container 안의 컴파일 대상 경로 목록을 돌려준다.
+
+    unit 이 디렉토리면 디렉토리 전체를 복사한다 — header 나 보조 파일이
+    소스 옆에 있어야 컴파일이 되기 때문이다. 컴파일 대상 목록은 인식된 소스뿐이다.
+    """
     root = solution.path if solution.path.is_dir() else solution.path.parent
-    staged: list[str] = []
-    for source in solution.sources:
-        rel = source.relative_to(root)
-        target = work_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        staged.append(f"{WORK_MOUNT}/{rel.as_posix()}")
-    return staged
+    if solution.path.is_dir():
+        shutil.copytree(solution.path, work_dir, dirs_exist_ok=True)
+    else:
+        shutil.copy2(solution.path, work_dir / solution.path.name)
+    return [f"{mount}/{source.relative_to(root).as_posix()}" for source in solution.sources]
 
 
 def compile_solution(
@@ -47,13 +48,14 @@ def compile_solution(
     work_dir: Path,
     memory_mib: int,
     options: CompileOptions,
+    mount: str = WORK_MOUNT,
 ) -> CompileOutcome:
     if solution.error:
         return CompileOutcome(ok=False, log=solution.error, work_dir=work_dir, run_argv=())
 
     assert solution.language is not None
-    sources = _stage_sources(solution, work_dir)
-    binds = ((work_dir, WORK_MOUNT, "rw"),)
+    sources = _stage_sources(solution, work_dir, mount)
+    binds = ((work_dir, mount, "rw"),)
     flags = options.flags.get(solution.language, "")
 
     compile_result = run_sandbox(
@@ -65,7 +67,7 @@ def compile_solution(
             argv=(
                 "/usr/local/lib/icpc/compile.sh",
                 solution.language.value,
-                WORK_MOUNT,
+                mount,
                 solution.entry,
                 flags,
                 "--",
@@ -91,7 +93,7 @@ def compile_solution(
             argv=(
                 "/usr/local/lib/icpc/run.sh",
                 solution.language.value,
-                WORK_MOUNT,
+                mount,
                 solution.entry,
                 str(memory_mib),
             ),
