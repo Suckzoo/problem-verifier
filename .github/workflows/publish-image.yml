@@ -22,7 +22,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Load python 3.9 pin
-        run: cat image/python39.env >> "$GITHUB_ENV"
+        run: grep -E '^[A-Z0-9_]+=' image/python39.env >> "$GITHUB_ENV"
       - uses: docker/build-push-action@v6
         id: build
         with:
