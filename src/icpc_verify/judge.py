@@ -281,6 +281,7 @@ def _run_interactive_testcase(
             ),
             timeout=limits.hard_kill + 60.0,
             user=host_user(),
+            workdir=VALIDATOR_MOUNT,
         )
     )
 

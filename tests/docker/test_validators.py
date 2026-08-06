@@ -103,6 +103,30 @@ def test_build_script_validator(tmp_path):
     assert verdict == verdicts.WRONG_ANSWER
 
 
+def test_canonical_build_script_with_relative_paths(tmp_path):
+    # 실제 Kattis/DOMjudge 패키지의 build 스크립트는 자기 디렉토리가 cwd 라고 가정하고
+    # 상대경로를 쓴다 (I2). $(dirname "$0") 을 쓰지 않는, 이 형태가 흔하다.
+    d = tmp_path / "output_validators" / "canonical"
+    d.mkdir(parents=True)
+    (d / "build").write_text("#!/bin/sh\ng++ -O2 -o run check.cpp\n", encoding="utf-8")
+    (d / "check.cpp").write_text(CHECKER_CPP, encoding="utf-8")
+    built = build_validator(d, tmp_path / "build_out", image=IMAGE, cpuset=0)
+    verdict, _ = run(tmp_path, built, "1 4\n")
+    assert verdict == verdicts.ACCEPTED
+
+
+def test_run_script_with_relative_exec(tmp_path):
+    # run 스크립트가 자기 디렉토리의 다른 실행 파일을 상대경로로 exec 하는 형태도 흔하다.
+    d = tmp_path / "output_validators" / "canonical_run"
+    d.mkdir(parents=True)
+    (d / "run_inner").write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    (d / "run_inner").chmod(0o755)
+    (d / "run").write_text('#!/bin/sh\nexec ./run_inner "$@"\n', encoding="utf-8")
+    built = build_validator(d, tmp_path / "build_out", image=IMAGE, cpuset=0)
+    verdict, _ = run(tmp_path, built, "anything\n")
+    assert verdict == verdicts.ACCEPTED
+
+
 def test_bad_exit_code_is_judge_error(tmp_path):
     d = tmp_path / "output_validators" / "broken"
     d.mkdir(parents=True)
