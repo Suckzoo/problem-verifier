@@ -49,7 +49,8 @@ def test_matching_expectation_exits_zero(tmp_path):
 
 
 def test_mismatched_expectation_exits_one(tmp_path):
-    """시간제한을 30초로 늘리면 sleepy.cpp 는 accepted 가 되어 기대와 어긋난다."""
+    """sleepy.cpp 는 항상 "0"을 출력한다. 시간제한을 30초로 늘리면 10초 sleep 안에 끝나
+    wrong_answer 가 되어, 디렉토리 이름이 기대하는 time_limit_exceeded 와 어긋난다."""
     problem = tmp_path / "problem"
     shutil.copytree(FIXTURE, problem)
     (problem / "problem.yaml").write_text(
@@ -61,7 +62,7 @@ def test_mismatched_expectation_exits_one(tmp_path):
     )
     proc, payload = run_cli(tmp_path, "time_limit_exceeded/sleepy.cpp", problem_dir=problem)
     assert proc.returncode == 1
-    assert payload["verdict"] == "accepted"
+    assert payload["verdict"] == "wrong_answer"
     assert payload["expectation_met"] is False
 
 
