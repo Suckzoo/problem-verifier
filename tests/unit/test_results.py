@@ -74,8 +74,30 @@ def test_output_limit_is_wrong_answer():
     assert "OLE" in message
 
 
+def test_output_limit_beats_run_time_error():
+    """runner 는 출력 제한 초과 시 SIGKILL 로 죽이므로 signal=9 가 항상 함께 온다.
+    그래도 OLE 가 wrong_answer 로 보고돼야 한다 (run_time_error 로 뒤덮이면 안 된다)."""
+    verdict, message = classify_run(
+        measure(output_limit_exceeded=True, signal=9, exit_code=-1), LIMITS, False, ""
+    )
+    assert verdict == verdicts.WRONG_ANSWER
+    assert "OLE" in message
+
+
 def test_tle_beats_run_time_error():
     verdict, _ = classify_run(measure(wall=2.0, timed_out=True, signal=9), LIMITS, False, "")
+    assert verdict == verdicts.TIME_LIMIT_EXCEEDED
+
+
+def test_hard_kill_tle_beats_output_limit():
+    """hard-kill 도 SIGKILL 이라 output_limit_exceeded 가 함께 True 일 수 있다.
+    이때는 시간 초과가 먼저이므로 여전히 TLE 여야 한다."""
+    verdict, _ = classify_run(
+        measure(wall=3.0, timed_out=True, signal=9, output_limit_exceeded=True),
+        LIMITS,
+        False,
+        "",
+    )
     assert verdict == verdicts.TIME_LIMIT_EXCEEDED
 
 

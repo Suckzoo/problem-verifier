@@ -8,6 +8,7 @@ import json
 import platform
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 from .cpu import (
@@ -19,7 +20,7 @@ from .cpu import (
     read_topology,
 )
 from .judge import JudgeOptions, judge_solution, measure_machine_factor
-from .problemcfg import ProblemConfigError, load_problem_config
+from .problemcfg import ProblemConfigError, ValidationMode, load_problem_config
 from .results import matches_expectation
 from .solutions import Language, discover_solutions
 from .testdata import TestDataError, collect_testcases
@@ -69,6 +70,10 @@ def run_judge(args: argparse.Namespace) -> int:
         default_time_limit=args.default_time_limit,
         default_memory_mib=args.default_memory_mib,
     )
+    if config.validation is not ValidationMode.DEFAULT:
+        raise ProblemConfigError(
+            f"validation: {config.validation.value} 는 아직 지원하지 않습니다 (계획 2)"
+        )
     limits = make_time_limits(config.time_limit, args.timelimit_overshoot)
     testcases = collect_testcases(problem_dir)
 
@@ -136,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
             return run_judge(args)
     except (ProblemConfigError, TestDataError, CpuError, OvershootSpecError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    except Exception:
+        # 예상 못한 예외까지 EXIT_MISMATCH(1) 로 새면, 이걸 소비하는 쪽에서 "verdict 불일치"와
+        # "인프라 장애"를 구별하지 못한다. 그러니 여기서 잡아 EXIT_CONFIG 로 묶는다.
+        traceback.print_exc(file=sys.stderr)
         return EXIT_CONFIG
     return EXIT_CONFIG
 
