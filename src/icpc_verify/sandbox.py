@@ -36,6 +36,7 @@ class SandboxSpec:
     argv: tuple[str, ...]
     timeout: float
     user: str | None = None
+    workdir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,8 +71,8 @@ def _parse_oom_killed(raw: bytes) -> bool:
     return bool(state.get("OOMKilled", False))
 
 
-def run_sandbox(spec: SandboxSpec) -> SandboxResult:
-    name = f"icpc-{uuid.uuid4().hex[:12]}"
+def _build_run_argv(spec: SandboxSpec, name: str) -> list[str]:
+    """`docker run` 에 넘길 argv 를 만든다. docker 를 실제로 부르지 않으므로 단독 테스트가 된다."""
     argv = [
         "run",
         "--name",
@@ -98,9 +99,17 @@ def run_sandbox(spec: SandboxSpec) -> SandboxResult:
     ]
     if spec.user:
         argv += ["--user", spec.user]
+    if spec.workdir:
+        argv += ["-w", spec.workdir]
     for host, target, mode in spec.binds:
         argv += ["-v", f"{host.resolve()}:{target}:{mode}"]
     argv += [spec.image, *spec.argv]
+    return argv
+
+
+def run_sandbox(spec: SandboxSpec) -> SandboxResult:
+    name = f"icpc-{uuid.uuid4().hex[:12]}"
+    argv = _build_run_argv(spec, name)
 
     timed_out = False
     exit_code = -1

@@ -100,6 +100,7 @@ def build_validator(
                 argv=(f"{VALIDATOR_MOUNT}/build",),
                 timeout=BUILD_TIMEOUT,
                 user=host_user(),
+                workdir=VALIDATOR_MOUNT,
             )
         )
         log = (result.stdout + result.stderr).decode("utf-8", errors="replace")
@@ -172,6 +173,7 @@ def run_custom_validator(
             ),
             timeout=timeout,
             user=host_user(),
+            workdir=VALIDATOR_MOUNT,
         )
     )
 

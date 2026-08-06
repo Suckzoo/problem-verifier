@@ -74,6 +74,10 @@ print("done", flush=True)
 raise SystemExit(43)
 """
 
+BROKEN_VALIDATOR = r"""
+raise RuntimeError("boom")
+"""
+
 
 def run(tmp_path, validator_code, solution_code, *, hard_kill=10.0, pair_timeout=15.0):
     vfile = tmp_path / "validator.py"
@@ -81,6 +85,8 @@ def run(tmp_path, validator_code, solution_code, *, hard_kill=10.0, pair_timeout
     sfile = tmp_path / "solution.py"
     sfile.write_text(solution_code, encoding="utf-8")
     result_path = tmp_path / "result.json"
+    sol_stderr_path = tmp_path / "sol.stderr"
+    val_stderr_path = tmp_path / "val.stderr"
     subprocess.run(
         [
             sys.executable,
@@ -93,6 +99,10 @@ def run(tmp_path, validator_code, solution_code, *, hard_kill=10.0, pair_timeout
             str(pair_timeout),
             "--validator-json",
             json.dumps([sys.executable, str(vfile)]),
+            "--sol-stderr",
+            str(sol_stderr_path),
+            "--val-stderr",
+            str(val_stderr_path),
             "--",
             sys.executable,
             str(sfile),
@@ -147,3 +157,10 @@ def test_result_shape(tmp_path):
     r = run(tmp_path, VALIDATOR, BINARY_SEARCH)
     assert set(r) == {"solution", "validator_exit", "validator_signal", "pair_timed_out"}
     assert set(r["solution"]) == {"wall", "cpu", "max_rss_kib", "exit_code", "signal", "timed_out"}
+
+
+def test_validator_traceback_reaches_val_stderr(tmp_path):
+    run(tmp_path, BROKEN_VALIDATOR, WRONG_GUESSER)
+    val_stderr = (tmp_path / "val.stderr").read_text(encoding="utf-8")
+    assert "RuntimeError" in val_stderr
+    assert "boom" in val_stderr

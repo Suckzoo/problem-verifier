@@ -350,6 +350,12 @@ solution의 메모리 제한과 섞이지 않는다.
   메모리 제한은 `solution limit + validator 여유(512 MiB)`로 잡고,
   solution의 max RSS로 별도 판정한다.
 
+같은 container를 공유하므로 solution과 validator는 uid가 같고, `/data/tc.in`
+(비밀 입력)과 `/data/tc.ans`를 solution도 읽을 수 있으며 `/feedback/judgemessage.txt`도
+solution이 덮어쓸 수 있다. verdict 위조는 안 된다 (runner가 PID 1이고 `run.json`은
+두 프로세스가 다 끝난 뒤에 기록된다). 이 설계는 출제자가 자기 문제를 검증하는
+용도로만 안전하다 - 신뢰하지 않는 제출물을 채점하는 데는 쓰지 말 것.
+
 ### 10.4 problem.yaml 파싱
 
 새 key를 먼저 보고 없으면 legacy key로 내려간다.
