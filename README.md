@@ -24,6 +24,23 @@ Kattis / DOMjudge 호환 ICPC 문제 package 검증 도구.
   run_time_error 다. 깨끗하게 끝났으면 validator 의 exit code (42/43/그 외)
   로 accepted/wrong_answer/judge_error 를 정한다.
 
+### 신뢰 모델 (`custom interactive`)
+
+`custom interactive` 에서는 solution 과 validator 가 container 하나를 같이 쓴다.
+그래서 다음을 전제해야 한다.
+
+- submission 이 비밀 입력 `/data/tc.in` 과 정답 `/data/tc.ans` 를 읽을 수 있다.
+  interactive 문제는 보통 입력 자체가 감춰야 할 비밀인데, 이 격리가 그 비밀을
+  지켜주지 못한다.
+- submission 이 `/feedback/judgemessage.txt` 를 덮어쓸 수 있다. 그러므로
+  judgemessage 는 항상 신뢰할 수 없는 텍스트로 다뤄야 한다 (validator 가 아니라
+  submission 이 썼을 수 있다).
+- verdict 위조는 안 된다. runner 가 PID 1 로 돌고, `run.json` 은 두 프로세스가
+  다 끝난 뒤에 기록되므로 submission 이 미리 심어 둔 값은 덮어써진다.
+
+이 도구는 출제자가 자기 문제를 검증하는 용도다. 신뢰하지 않는 제출물을 채점하는
+데 쓰지 말 것.
+
 ## 설치
 
     python -m pip install -e .
