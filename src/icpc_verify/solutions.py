@@ -78,24 +78,24 @@ def _python_entry(sources: tuple[Path, ...], root: Path) -> tuple[str, str | Non
     return "", "python 소스가 여러 개면 main.py 가 있어야 합니다"
 
 
-def _build_solution(
-    unit: Path, expected: str, problem_dir: Path
-) -> tuple[Solution | None, str | None]:
-    """(solution, warning) 을 돌려준다. 건너뛸 대상이면 solution 이 None 이다."""
-    solutions_root = problem_dir / "solutions"
-    rel_path = unit.relative_to(solutions_root).as_posix()
+def describe_unit(unit: Path, root: Path, expected: str) -> tuple[Solution | None, str | None]:
+    """단일 파일 또는 디렉토리 unit 을 Solution 으로 해석한다. rel_path 는 root 기준이다.
+
+    (solution, warning) 을 돌려준다. 건너뛸 대상이면 solution 이 None 이다.
+    """
+    rel_path = unit.relative_to(root).as_posix()
 
     if unit.is_dir():
         sources = tuple(sorted(p for p in unit.rglob("*") if p.is_file() and _language_of(p)))
         source_root = unit
     else:
         if _language_of(unit) is None:
-            return None, f"지원하지 않는 확장자입니다. 건너뜁니다: solutions/{rel_path}"
+            return None, f"지원하지 않는 확장자입니다. 건너뜁니다: {rel_path}"
         sources = (unit,)
         source_root = unit.parent
 
     if not sources:
-        return None, f"소스 파일이 없습니다. 건너뜁니다: solutions/{rel_path}"
+        return None, f"소스 파일이 없습니다. 건너뜁니다: {rel_path}"
 
     languages = {_language_of(p) for p in sources}
     name = sanitize_name(rel_path)
@@ -136,6 +136,12 @@ def _build_solution(
         ),
         None,
     )
+
+
+def _build_solution(
+    unit: Path, expected: str, problem_dir: Path
+) -> tuple[Solution | None, str | None]:
+    return describe_unit(unit, problem_dir / "solutions", expected)
 
 
 def discover_solutions(
