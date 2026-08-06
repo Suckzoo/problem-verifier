@@ -42,6 +42,22 @@ def _docker(*args: str, **kwargs) -> subprocess.CompletedProcess:
         raise SandboxError("docker 명령을 찾지 못했습니다") from exc
 
 
+def _parse_oom_killed(raw: bytes) -> bool:
+    """`docker inspect --format '{{json .State}}'` 출력에서 OOMKilled 여부를 읽는다.
+
+    비어있거나, JSON이 아니거나, dict가 아니거나, 키가 없으면 OOM이 아니라고 본다.
+    """
+    if not raw.strip():
+        return False
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        return False
+    if not isinstance(state, dict):
+        return False
+    return bool(state.get("OOMKilled", False))
+
+
 def run_sandbox(spec: SandboxSpec) -> SandboxResult:
     name = f"icpc-{uuid.uuid4().hex[:12]}"
     argv = [
@@ -73,26 +89,29 @@ def run_sandbox(spec: SandboxSpec) -> SandboxResult:
     argv += [spec.image, *spec.argv]
 
     timed_out = False
-    try:
-        proc = _docker(*argv, timeout=spec.timeout)
-        exit_code = proc.returncode
-        stdout, stderr = proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        exit_code = -1
-        stdout = exc.stdout or b""
-        stderr = exc.stderr or b""
-        _docker("kill", name, timeout=30)
-
-    inspect = _docker("inspect", "--format", "{{json .State}}", name, timeout=30)
+    exit_code = -1
+    stdout = b""
+    stderr = b""
     oom_killed = False
-    if inspect.returncode == 0 and inspect.stdout.strip():
+    try:
         try:
-            oom_killed = bool(json.loads(inspect.stdout)["OOMKilled"])
-        except (ValueError, KeyError):
-            oom_killed = False
+            proc = _docker(*argv, timeout=spec.timeout)
+            exit_code = proc.returncode
+            stdout, stderr = proc.stdout, proc.stderr
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            exit_code = -1
+            stdout = exc.stdout or b""
+            stderr = exc.stderr or b""
+            _docker("kill", name, timeout=30)
 
-    _docker("rm", "-f", name, timeout=30)
+        inspect = _docker("inspect", "--format", "{{json .State}}", name, timeout=30)
+        if inspect.returncode == 0:
+            oom_killed = _parse_oom_killed(inspect.stdout)
+    finally:
+        # kill/inspect 가 예외를 던지더라도 container 는 반드시 정리한다.
+        _docker("rm", "-f", name, timeout=30)
+
     return SandboxResult(
         exit_code=exit_code,
         oom_killed=oom_killed,
