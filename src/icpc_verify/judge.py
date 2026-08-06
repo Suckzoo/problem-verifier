@@ -1,13 +1,14 @@
 """solution 하나를 testcase 전체에 대해 채점한다.
 
 testcase 1회 = container 1개다. 기본은 lazy judging 이고 첫 비 AC 에서 멈춘다.
-validation: custom 은 이 모듈이 다룬다. custom interactive 는 계획 2 Task 5 다.
+validation: default / custom / custom interactive 를 모두 이 모듈이 다룬다.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import signal as signal_module
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -22,7 +23,14 @@ from .sandbox import SandboxSpec, host_user, run_sandbox
 from .solutions import Language, Solution
 from .testdata import TestCase
 from .timelimits import TimeLimits
-from .validators import ValidatorError, build_validator, run_custom_validator
+from .validators import (
+    VALIDATOR_MOUNT,
+    BuiltValidator,
+    ValidatorError,
+    build_validator,
+    read_judgemessage,
+    run_custom_validator,
+)
 
 RUN_MOUNT = "/run"
 OUT_MOUNT = "/out"
@@ -83,6 +91,34 @@ def _describe_missing_run_result(sandbox_stderr: bytes) -> str:
     if detail:
         message = f"{message}\nstderr: {detail}"
     return message
+
+
+def _classify_interactive(raw: dict, limits: TimeLimits, memory_mib: int) -> tuple[str, str]:
+    """interactive_runner.py 의 result JSON 을 verdict 으로 바꾼다.
+
+    우선순위: TLE(pair timeout 포함) -> 메모리 -> 비정상 종료 -> validator 판정.
+    SIGPIPE 는 3번 단계에서 용서되므로 validator 가 43 으로 끝나도 정상 WA 로 남는다
+    (spec 의 "SIGPIPE 는 용서한다" 규약).
+    """
+    sol = raw["solution"]
+    if raw["pair_timed_out"] or sol["timed_out"] or sol["wall"] > limits.limit:
+        return (
+            verdicts.TIME_LIMIT_EXCEEDED,
+            f"wall {sol['wall']:.3f}s 가 시간제한 {limits.limit:.3f}s 를 넘었습니다",
+        )
+    if sol["max_rss_kib"] > memory_mib * 1024:
+        return verdicts.RUN_TIME_ERROR, "메모리 제한을 넘었습니다 (max RSS 기준)"
+    if sol["signal"] not in (0, int(signal_module.SIGPIPE)):
+        return verdicts.RUN_TIME_ERROR, f"signal {sol['signal']} 로 종료했습니다"
+    if sol["signal"] == 0 and sol["exit_code"] != 0:
+        return verdicts.RUN_TIME_ERROR, f"exit code {sol['exit_code']} 로 종료했습니다"
+    verdict = {42: verdicts.ACCEPTED, 43: verdicts.WRONG_ANSWER}.get(
+        raw["validator_exit"], verdicts.JUDGE_ERROR
+    )
+    message = ""
+    if verdict == verdicts.JUDGE_ERROR:
+        message = f"validator exit code {raw['validator_exit']}"
+    return verdict, message
 
 
 def _run_one_testcase(
@@ -175,6 +211,92 @@ def _run_one_testcase(
     return measurement, team_output, stdout_path, stderr_text
 
 
+def _run_interactive_testcase(
+    case: TestCase,
+    run_argv: Sequence[str],
+    validator: BuiltValidator,
+    work_dir: Path,
+    io_dir: Path,
+    config: ProblemConfig,
+    limits: TimeLimits,
+    options: JudgeOptions,
+) -> tuple[dict | None, Path, str]:
+    """(run.json 파싱 결과, feedback 디렉토리, 진단 메시지) 를 돌려준다.
+
+    파싱 결과가 None 이면 run.json 을 만들지 못한 것이다 (judge_error). 그 경우
+    메시지 자리에 _describe_missing_run_result 가 만든 진단이 들어간다 (성공했을 때는
+    빈 문자열이다 - judgemessage 는 호출한 쪽에서 feedback 디렉토리를 통해 읽는다).
+
+    interactive 에서는 solution 의 stdin 이 validator 의 stdout 이므로 입력 파일을
+    solution 에 직접 리다이렉트하지 않는다 - validator 가 argv 로 받은 /data/tc.in 을
+    스스로 읽는다.
+    """
+    data_dir = io_dir / "idata"
+    out_dir = io_dir / "out"
+    feedback_dir = io_dir / "feedback"
+    for d in (data_dir, out_dir, feedback_dir):
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True)
+    # the container runs as the host user (--user), so owner rwx is enough for every bind.
+    data_dir.chmod(0o755)
+    out_dir.chmod(0o755)
+    feedback_dir.chmod(0o755)
+    shutil.copy2(case.input_path, data_dir / "tc.in")
+    shutil.copy2(case.answer_path, data_dir / "tc.ans")
+
+    container_memory = options.memory_mib + 512
+    result = run_sandbox(
+        SandboxSpec(
+            image=options.image,
+            cpuset=options.cpuset,
+            memory_mib=container_memory,
+            binds=(
+                (work_dir, WORK_MOUNT, "ro"),
+                (validator.dir, VALIDATOR_MOUNT, "ro"),
+                (data_dir, "/data", "ro"),
+                (feedback_dir, "/feedback", "rw"),
+                (out_dir, OUT_MOUNT, "rw"),
+            ),
+            argv=(
+                "python3",
+                "/usr/local/bin/interactive_runner.py",
+                "--result",
+                f"{OUT_MOUNT}/run.json",
+                "--hard-kill",
+                f"{limits.hard_kill:.3f}",
+                "--pair-timeout",
+                f"{limits.hard_kill + 5.0:.3f}",
+                "--validator-json",
+                json.dumps(
+                    [
+                        *validator.argv,
+                        "/data/tc.in",
+                        "/data/tc.ans",
+                        "/feedback",
+                        *config.validator_flags,
+                    ]
+                ),
+                "--",
+                *run_argv,
+            ),
+            timeout=limits.hard_kill + 60.0,
+            user=host_user(),
+        )
+    )
+
+    result_file = out_dir / "run.json"
+    if not result_file.is_file():
+        message = _describe_missing_run_result(result.stderr)
+        if result.oom_killed:
+            # container 전체 기준이라 solution/validator 중 누가 죽었는지는 모른다.
+            oom_note = "container 가 OOMKilled 되었습니다 (누가 죽었는지는 구분할 수 없습니다)"
+            message = f"{message}\n{oom_note}"
+        return None, feedback_dir, message
+
+    raw = json.loads(result_file.read_text(encoding="utf-8"))
+    return raw, feedback_dir, ""
+
+
 def judge_solution(
     problem_dir: Path,
     config: ProblemConfig,
@@ -218,7 +340,7 @@ def judge_solution(
         return result
 
     validator = None
-    if config.validation is ValidationMode.CUSTOM:
+    if config.validation in (ValidationMode.CUSTOM, ValidationMode.CUSTOM_INTERACTIVE):
         assert config.validator_dir is not None
         try:
             validator = build_validator(
@@ -247,6 +369,49 @@ def judge_solution(
             result.testcases.append(
                 TestCaseResult(case.id, case.group, verdicts.NOT_RUN, 0.0, 0.0, 0, 0, "")
             )
+            continue
+
+        if config.validation is ValidationMode.CUSTOM_INTERACTIVE:
+            assert validator is not None
+            raw, feedback_dir, missing_message = _run_interactive_testcase(
+                case, outcome.run_argv, validator, work_dir, io_dir, config, limits, options
+            )
+            if raw is None:
+                result.testcases.append(
+                    TestCaseResult(
+                        id=case.id,
+                        group=case.group,
+                        verdict=verdicts.JUDGE_ERROR,
+                        wall=0.0,
+                        cpu=0.0,
+                        mem_kib=0,
+                        exit_code=0,
+                        message=missing_message,
+                    )
+                )
+                if not options.judge_all:
+                    stopped = True
+                continue
+
+            verdict, message = _classify_interactive(raw, limits, options.memory_mib)
+            judgemessage = read_judgemessage(feedback_dir)
+            if judgemessage:
+                message = f"{message}\n{judgemessage}".strip() if message else judgemessage
+            sol = raw["solution"]
+            result.testcases.append(
+                TestCaseResult(
+                    id=case.id,
+                    group=case.group,
+                    verdict=verdict,
+                    wall=sol["wall"],
+                    cpu=sol["cpu"],
+                    mem_kib=sol["max_rss_kib"],
+                    exit_code=sol["exit_code"],
+                    message=message,
+                )
+            )
+            if verdict != verdicts.ACCEPTED and not options.judge_all:
+                stopped = True
             continue
 
         measurement, team_output, team_output_path, stderr_text = _run_one_testcase(

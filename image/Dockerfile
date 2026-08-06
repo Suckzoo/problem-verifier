@@ -20,10 +20,12 @@ RUN curl -fsSL "$PY39_URL" -o /tmp/py39.tar.gz \
     && rm /tmp/py39.tar.gz
 
 COPY runner.py /usr/local/bin/runner.py
+COPY interactive_runner.py /usr/local/bin/interactive_runner.py
 COPY languages/ /usr/local/lib/icpc/languages/
 COPY bench/bench.c /tmp/bench.c
 
-RUN chmod +x /usr/local/bin/runner.py /usr/local/lib/icpc/languages/*.sh \
+RUN chmod +x /usr/local/bin/runner.py /usr/local/bin/interactive_runner.py \
+        /usr/local/lib/icpc/languages/*.sh \
     && ln -sf /usr/local/lib/icpc/languages/compile.sh /usr/local/lib/icpc/compile.sh \
     && ln -sf /usr/local/lib/icpc/languages/run.sh /usr/local/lib/icpc/run.sh \
     && gcc -O2 -o /usr/local/bin/bench /tmp/bench.c && rm /tmp/bench.c

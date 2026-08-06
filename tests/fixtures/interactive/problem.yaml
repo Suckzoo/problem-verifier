@@ -1,0 +1,4 @@
+name: Guess The Number
+validation: custom interactive
+limits:
+  memory: 512
