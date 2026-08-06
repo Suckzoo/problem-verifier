@@ -931,7 +931,6 @@ from .validators import ValidatorError, build_validator, run_custom_validator
 
 testcase 루프 안, measurement를 얻은 뒤의 비교 부분:
 
-```python
 먼저 `_run_one_testcase`의 반환값을
 `(measurement, team_output_bytes, team_output_path, stderr_text)` 4-tuple로 넓힌다.
 `team_output_path`는 `out_dir / "stdout"`이고, 파일이 없으면(출력 없이 종료) 빈 파일을
