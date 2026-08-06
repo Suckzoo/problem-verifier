@@ -96,29 +96,40 @@ def _describe_missing_run_result(sandbox_stderr: bytes) -> str:
 def _classify_interactive(raw: dict, limits: TimeLimits, memory_mib: int) -> tuple[str, str]:
     """interactive_runner.py 의 result JSON 을 verdict 으로 바꾼다.
 
-    우선순위: TLE(pair timeout 포함) -> 메모리 -> 비정상 종료 -> validator 판정.
-    SIGPIPE 는 3번 단계에서 용서되므로 validator 가 43 으로 끝나도 정상 WA 로 남는다
-    (spec 의 "SIGPIPE 는 용서한다" 규약).
+    우선순위: TLE(solution 이 실제로 제한을 넘겼을 때만) -> validator 가 죽은 경우의
+    judge_error(pair timeout인데 solution 은 멀쩡했거나, validator exit code 가
+    42/43 이 아닌 경우) -> 메모리 -> 비정상 종료 -> validator 판정.
+
+    validator 쪽 judge_error 를 메모리/비정상종료보다 먼저 보는 이유: validator 가
+    죽으면 그 pipe 의 EOF 때문에 solution 이 뒤따라 비정상 종료하는 경우가 흔하다 -
+    그 원인은 validator 에 있으므로 solution 의 잘못으로 보고하면 안 된다.
+    SIGPIPE 는 비정상종료 단계에서 용서되므로 validator 가 43 으로 끝나도 정상 WA 로
+    남는다 (spec 의 "SIGPIPE 는 용서한다" 규약) - 이 경우는 42/43 이므로 judge_error
+    단계를 그냥 지나간다.
     """
     sol = raw["solution"]
-    if raw["pair_timed_out"] or sol["timed_out"] or sol["wall"] > limits.limit:
+    solution_over_limit = sol["timed_out"] or sol["wall"] > limits.limit
+    if raw["pair_timed_out"] and not solution_over_limit:
+        detail = f"solution wall {sol['wall']:.3f}s <= 시간제한 {limits.limit:.3f}s"
+        return (
+            verdicts.JUDGE_ERROR,
+            f"validator 가 pair timeout 안에 끝나지 않았습니다 ({detail})",
+        )
+    if raw["pair_timed_out"] or solution_over_limit:
         return (
             verdicts.TIME_LIMIT_EXCEEDED,
             f"wall {sol['wall']:.3f}s 가 시간제한 {limits.limit:.3f}s 를 넘었습니다",
         )
+    if raw["validator_exit"] not in (42, 43):
+        return verdicts.JUDGE_ERROR, f"validator exit code {raw['validator_exit']}"
     if sol["max_rss_kib"] > memory_mib * 1024:
         return verdicts.RUN_TIME_ERROR, "메모리 제한을 넘었습니다 (max RSS 기준)"
     if sol["signal"] not in (0, int(signal_module.SIGPIPE)):
         return verdicts.RUN_TIME_ERROR, f"signal {sol['signal']} 로 종료했습니다"
     if sol["signal"] == 0 and sol["exit_code"] != 0:
         return verdicts.RUN_TIME_ERROR, f"exit code {sol['exit_code']} 로 종료했습니다"
-    verdict = {42: verdicts.ACCEPTED, 43: verdicts.WRONG_ANSWER}.get(
-        raw["validator_exit"], verdicts.JUDGE_ERROR
-    )
-    message = ""
-    if verdict == verdicts.JUDGE_ERROR:
-        message = f"validator exit code {raw['validator_exit']}"
-    return verdict, message
+    verdict = {42: verdicts.ACCEPTED, 43: verdicts.WRONG_ANSWER}[raw["validator_exit"]]
+    return verdict, ""
 
 
 def _run_one_testcase(
