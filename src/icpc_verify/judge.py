@@ -93,6 +93,14 @@ def _describe_missing_run_result(sandbox_stderr: bytes) -> str:
     return message
 
 
+def _read_stderr_tail(path: Path) -> str:
+    """stderr 파일에서 앞 STDERR_KEEP_BYTES 만큼만 읽는다. 파일이 없으면 빈 문자열이다."""
+    if not path.is_file():
+        return ""
+    data = path.read_bytes()[:STDERR_KEEP_BYTES]
+    return data.decode("utf-8", errors="replace")
+
+
 def _classify_interactive(raw: dict, limits: TimeLimits, memory_mib: int) -> tuple[str, str]:
     """interactive_runner.py 의 result JSON 을 verdict 으로 바꾼다.
 
@@ -214,11 +222,7 @@ def _run_one_testcase(
     else:
         team_output = b""
         stdout_path.write_bytes(b"")
-    stderr_path = out_dir / "stderr"
-    stderr_text = ""
-    if stderr_path.is_file():
-        data = stderr_path.read_bytes()[:STDERR_KEEP_BYTES]
-        stderr_text = data.decode("utf-8", errors="replace")
+    stderr_text = _read_stderr_tail(out_dir / "stderr")
     return measurement, team_output, stdout_path, stderr_text
 
 
@@ -231,12 +235,14 @@ def _run_interactive_testcase(
     config: ProblemConfig,
     limits: TimeLimits,
     options: JudgeOptions,
-) -> tuple[dict | None, Path, str]:
-    """(run.json 파싱 결과, feedback 디렉토리, 진단 메시지) 를 돌려준다.
+) -> tuple[dict | None, Path, str, str, str]:
+    """(run.json 파싱 결과, feedback 디렉토리, 진단 메시지, solution stderr, validator stderr) 를
+    돌려준다.
 
     파싱 결과가 None 이면 run.json 을 만들지 못한 것이다 (judge_error). 그 경우
-    메시지 자리에 _describe_missing_run_result 가 만든 진단이 들어간다 (성공했을 때는
-    빈 문자열이다 - judgemessage 는 호출한 쪽에서 feedback 디렉토리를 통해 읽는다).
+    메시지 자리에 _describe_missing_run_result 가 만든 진단이 들어가고 두 stderr 는
+    빈 문자열이다 (성공했을 때 진단 메시지는 빈 문자열이다 - judgemessage 는 호출한
+    쪽에서 feedback 디렉토리를 통해 읽는다).
 
     interactive 에서는 solution 의 stdin 이 validator 의 stdout 이므로 입력 파일을
     solution 에 직접 리다이렉트하지 않는다 - validator 가 argv 로 받은 /data/tc.in 을
@@ -287,6 +293,10 @@ def _run_interactive_testcase(
                         *config.validator_flags,
                     ]
                 ),
+                "--sol-stderr",
+                f"{OUT_MOUNT}/sol.stderr",
+                "--val-stderr",
+                f"{OUT_MOUNT}/val.stderr",
                 "--",
                 *run_argv,
             ),
@@ -303,10 +313,12 @@ def _run_interactive_testcase(
             # container 전체 기준이라 solution/validator 중 누가 죽었는지는 모른다.
             oom_note = "container 가 OOMKilled 되었습니다 (누가 죽었는지는 구분할 수 없습니다)"
             message = f"{message}\n{oom_note}"
-        return None, feedback_dir, message
+        return None, feedback_dir, message, "", ""
 
     raw = json.loads(result_file.read_text(encoding="utf-8"))
-    return raw, feedback_dir, ""
+    sol_stderr_text = _read_stderr_tail(out_dir / "sol.stderr")
+    val_stderr_text = _read_stderr_tail(out_dir / "val.stderr")
+    return raw, feedback_dir, "", sol_stderr_text, val_stderr_text
 
 
 def judge_solution(
@@ -385,8 +397,10 @@ def judge_solution(
 
         if config.validation is ValidationMode.CUSTOM_INTERACTIVE:
             assert validator is not None
-            raw, feedback_dir, missing_message = _run_interactive_testcase(
-                case, outcome.run_argv, validator, work_dir, io_dir, config, limits, options
+            raw, feedback_dir, missing_message, sol_stderr_text, val_stderr_text = (
+                _run_interactive_testcase(
+                    case, outcome.run_argv, validator, work_dir, io_dir, config, limits, options
+                )
             )
             if raw is None:
                 result.testcases.append(
@@ -409,6 +423,10 @@ def judge_solution(
             judgemessage = read_judgemessage(feedback_dir)
             if judgemessage:
                 message = f"{message}\n{judgemessage}".strip() if message else judgemessage
+            if verdict == verdicts.RUN_TIME_ERROR and sol_stderr_text:
+                message = f"{message}\nstderr: {sol_stderr_text}"
+            if verdict == verdicts.JUDGE_ERROR and val_stderr_text:
+                message = f"{message}\nvalidator stderr: {val_stderr_text}"
             sol = raw["solution"]
             result.testcases.append(
                 TestCaseResult(

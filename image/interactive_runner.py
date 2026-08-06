@@ -22,6 +22,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hard-kill", type=float, required=True)
     p.add_argument("--pair-timeout", type=float, required=True)
     p.add_argument("--validator-json", required=True)
+    p.add_argument("--sol-stderr", required=True)
+    p.add_argument("--val-stderr", required=True)
     p.add_argument("argv", nargs=argparse.REMAINDER)
     args = p.parse_args()
     if args.argv and args.argv[0] == "--":
@@ -45,11 +47,16 @@ def main() -> int:
     sol_to_val_read, sol_to_val_write = os.pipe()
     val_to_sol_read, val_to_sol_write = os.pipe()
 
+    # 두 프로세스의 stderr 를 파일로 남긴다 (spec §8: 8 KiB 까지 진단에 쓴다).
+    # DEVNULL 로 버리면 validator 가 죽었을 때 원인을 알 방법이 없어진다.
+    val_stderr_f = open(args.val_stderr, "wb")
+    sol_stderr_f = open(args.sol_stderr, "wb")
+
     validator = subprocess.Popen(
         args.validator_argv,
         stdin=sol_to_val_read,
         stdout=val_to_sol_write,
-        stderr=subprocess.DEVNULL,
+        stderr=val_stderr_f,
         preexec_fn=os.setsid,
     )
 
@@ -66,9 +73,13 @@ def main() -> int:
         args.argv,
         stdin=val_to_sol_read,
         stdout=sol_to_val_write,
-        stderr=subprocess.DEVNULL,
+        stderr=sol_stderr_f,
         preexec_fn=set_solution_limits,
     )
+
+    # 자식은 dup 된 fd 를 따로 들고 있으므로 부모 쪽 file object 는 바로 닫아도 된다.
+    val_stderr_f.close()
+    sol_stderr_f.close()
 
     # 부모는 pipe 끝을 전부 닫는다. 안 닫으면 EOF 가 전달되지 않는다.
     for fd in (sol_to_val_read, sol_to_val_write, val_to_sol_read, val_to_sol_write):
