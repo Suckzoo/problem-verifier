@@ -19,7 +19,7 @@ from .cpu import (
     read_topology,
 )
 from .judge import JudgeOptions, judge_solution, measure_machine_factor
-from .problemcfg import ProblemConfigError, load_problem_config
+from .problemcfg import ProblemConfigError, ValidationMode, load_problem_config
 from .results import matches_expectation
 from .solutions import Language, discover_solutions
 from .testdata import TestDataError, collect_testcases
@@ -69,6 +69,10 @@ def run_judge(args: argparse.Namespace) -> int:
         default_time_limit=args.default_time_limit,
         default_memory_mib=args.default_memory_mib,
     )
+    if config.validation is not ValidationMode.DEFAULT:
+        raise ProblemConfigError(
+            f"validation: {config.validation.value} 는 아직 지원하지 않습니다 (계획 2)"
+        )
     limits = make_time_limits(config.time_limit, args.timelimit_overshoot)
     testcases = collect_testcases(problem_dir)
 
