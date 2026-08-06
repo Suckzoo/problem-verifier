@@ -1,0 +1,34 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest ruff
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python -m pytest tests/unit -v
+
+  docker-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest
+      - name: Build judge image
+        run: |
+          set -a && . image/python39.env && set +a
+          docker build --platform linux/amd64 \
+            --build-arg PY39_URL="$PY39_URL" --build-arg PY39_SHA256="$PY39_SHA256" \
+            -t icpc-judge:test image/
+          echo "icpc-judge:test" > image/IMAGE_DIGEST
+      - run: python -m pytest tests/docker -v -m docker

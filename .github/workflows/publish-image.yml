@@ -1,0 +1,39 @@
+name: publish-image
+on:
+  push:
+    branches: [main]
+    paths:
+      - "image/**"
+      - ".github/workflows/publish-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Load python 3.9 pin
+        run: cat image/python39.env >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: image
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/suckzoo/icpc-judge:latest
+          build-args: |
+            PY39_URL=${{ env.PY39_URL }}
+            PY39_SHA256=${{ env.PY39_SHA256 }}
+      - name: Print digest to pin
+        run: |
+          echo "image/IMAGE_DIGEST 에 아래 한 줄을 커밋하세요"
+          echo "ghcr.io/suckzoo/icpc-judge@${{ steps.build.outputs.digest }}"
