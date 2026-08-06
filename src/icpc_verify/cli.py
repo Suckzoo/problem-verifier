@@ -8,6 +8,7 @@ import json
 import platform
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 from .cpu import (
@@ -140,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
             return run_judge(args)
     except (ProblemConfigError, TestDataError, CpuError, OvershootSpecError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    except Exception:
+        # 예상 못한 예외까지 EXIT_MISMATCH(1) 로 새면, 이걸 소비하는 쪽에서 "verdict 불일치"와
+        # "인프라 장애"를 구별하지 못한다. 그러니 여기서 잡아 EXIT_CONFIG 로 묶는다.
+        traceback.print_exc(file=sys.stderr)
         return EXIT_CONFIG
     return EXIT_CONFIG
 
