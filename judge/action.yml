@@ -81,8 +81,15 @@ runs:
         # exit 2(설정/인프라 오류)만 job 실패로 만든다.
         status=${status:-0}
         if [ "$status" -ge 2 ]; then exit "$status"; fi
+    - id: slug
+      shell: bash
+      run: |
+        # 같은 workflow run 안에서 verify.yml 을 여러 문제로 병렬 호출해도
+        # (예: selftest.yml) artifact 이름이 겹치지 않도록 problem-dir 을 접두어로 쓴다.
+        slug="$(printf '%s' "${{ inputs.problem-dir }}" | tr -c 'A-Za-z0-9_.-' '_')"
+        echo "slug=$slug" >> "$GITHUB_OUTPUT"
     - uses: actions/upload-artifact@v4
       with:
-        name: icpc-verify-result-${{ inputs.name }}
+        name: icpc-verify-result-${{ steps.slug.outputs.slug }}-${{ inputs.name }}
         path: result-${{ inputs.name }}.json
         if-no-files-found: error
