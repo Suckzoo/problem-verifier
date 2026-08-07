@@ -23,6 +23,7 @@ from .cpu import (
 from .discover import build_matrix, changed_solution_units, decide_scope
 from .judge import JudgeOptions, judge_solution, measure_machine_factor
 from .problemcfg import ProblemConfigError, load_problem_config
+from .report import generate_report
 from .results import matches_expectation
 from .solutions import Language, discover_solutions
 from .testdata import TestDataError, collect_testcases
@@ -68,6 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--solutions-filter", default="")
     discover.add_argument("--default-time-limit", type=float, default=1.0)
     discover.add_argument("--default-memory-mib", type=int, default=2048)
+
+    report_p = sub.add_parser("report", help="result.json 들을 병합해 리포트를 만든다")
+    report_p.add_argument("--results-dir", type=Path, required=True)
+    report_p.add_argument("--problem", type=Path, required=True)
+    report_p.add_argument("--summary-out", type=Path, required=True)
+    report_p.add_argument("--html-out", type=Path, required=True)
+    report_p.add_argument("--expected-matrix", type=Path, default=None)
+    report_p.add_argument("--verdict-match", choices=["exact", "any-rejected"], default="exact")
     return parser
 
 
@@ -239,6 +248,32 @@ def run_discover(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def run_report(args: argparse.Namespace) -> int:
+    results = []
+    for path in sorted(args.results_dir.rglob("result*.json")):
+        results.append(json.loads(path.read_text(encoding="utf-8")))
+    problem = json.loads(args.problem.read_text(encoding="utf-8"))
+    if "problem" in problem:  # discover.json 전체를 넘겨도 동작한다
+        problem = problem["problem"]
+    expected_matrix = None
+    if args.expected_matrix and args.expected_matrix.is_file():
+        loaded = json.loads(args.expected_matrix.read_text(encoding="utf-8"))
+        expected_matrix = loaded["matrix"] if "matrix" in loaded else loaded
+
+    outcome = generate_report(
+        results, problem, expected_matrix=expected_matrix, verdict_match=args.verdict_match
+    )
+    args.summary_out.parent.mkdir(parents=True, exist_ok=True)
+    args.summary_out.write_text(outcome.markdown, encoding="utf-8")
+    args.html_out.parent.mkdir(parents=True, exist_ok=True)
+    args.html_out.write_text(outcome.html, encoding="utf-8")
+
+    for failure in outcome.failures:
+        print(f"FAIL: {failure}", file=sys.stderr)
+    print(f"report: {len(results)}개 결과, {'통과' if outcome.passed else '실패'}")
+    return EXIT_OK if outcome.passed else EXIT_MISMATCH
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -246,6 +281,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_judge(args)
         if args.command == "discover":
             return run_discover(args)
+        if args.command == "report":
+            return run_report(args)
     except (ProblemConfigError, TestDataError, CpuError, OvershootSpecError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
