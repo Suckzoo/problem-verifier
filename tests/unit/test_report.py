@@ -189,3 +189,15 @@ def test_machine_factor_warning():
     )
     assert "1.50" in r.markdown
     assert "⚠" in r.markdown
+
+
+def test_html_shows_accepted_message_but_not_not_run():
+    cases = [
+        case("01", "accepted", message="validator warning: trailing space"),
+        case("02", "not_run", wall=0.0, message="skipped after earlier failure"),
+    ]
+    r = generate_report(
+        [result(testcases=cases)], PROBLEM, expected_matrix=None, verdict_match="exact"
+    )
+    assert "validator warning: trailing space" in r.html
+    assert "skipped after earlier failure" not in r.html

@@ -262,7 +262,7 @@ def _render_html(
                     f"<b>expected</b><pre>{e(c['expected_excerpt'])}</pre>"
                     f"<b>actual</b><pre>{e(c['actual_excerpt'])}</pre>"
                 )
-            if c["message"] and c["verdict"] not in (verdicts.ACCEPTED, verdicts.NOT_RUN):
+            if c["message"] and c["verdict"] != verdicts.NOT_RUN:
                 parts.append(f"<pre>{e(c['message'][:4096])}</pre>")
 
         if r.get("compile_log") and r["verdict"] in (verdicts.COMPILER_ERROR, verdicts.JUDGE_ERROR):
