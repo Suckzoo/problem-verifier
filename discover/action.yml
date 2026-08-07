@@ -1,0 +1,56 @@
+name: icpc-verify discover
+description: 채점 대상 solution 과 문제 설정을 결정한다
+inputs:
+  problem-dir:
+    default: "."
+  full:
+    default: "false"
+  solutions-filter:
+    default: ""
+  default-time-limit:
+    default: "1"
+  default-memory-mib:
+    default: "2048"
+outputs:
+  matrix:
+    value: ${{ steps.emit.outputs.matrix }}
+  count:
+    value: ${{ steps.emit.outputs.count }}
+  full:
+    value: ${{ steps.emit.outputs.full }}
+  problem:
+    value: ${{ steps.emit.outputs.problem }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - shell: bash
+      run: python -m pip install --quiet "${{ github.action_path }}/.."
+    - id: emit
+      shell: bash
+      env:
+        FULL: ${{ inputs.full }}
+        BEFORE: ${{ github.event.before || '' }}
+        BASE_REF: ${{ github.base_ref || '' }}
+      run: |
+        set -eu
+        args=(--problem-dir "${{ inputs.problem-dir }}" --output discover.json
+              --event-name "${{ github.event_name }}"
+              --head "${{ github.sha }}"
+              --default-time-limit "${{ inputs.default-time-limit }}"
+              --default-memory-mib "${{ inputs.default-memory-mib }}")
+        if [ "$FULL" = "true" ]; then args+=(--full); fi
+        if [ -n "$BEFORE" ]; then args+=(--before "$BEFORE"); fi
+        if [ -n "$BASE_REF" ]; then args+=(--base-ref "$BASE_REF"); fi
+        if [ -n "${{ inputs.solutions-filter }}" ]; then args+=(--solutions-filter "${{ inputs.solutions-filter }}"); fi
+        icpc-verify discover "${args[@]}"
+        {
+          echo "matrix=$(jq -c '.matrix' discover.json)"
+          echo "count=$(jq -r '.count' discover.json)"
+          echo "full=$(jq -r '.full' discover.json)"
+          echo "problem=$(jq -c '.problem' discover.json)"
+        } >> "$GITHUB_OUTPUT"
+    - shell: bash
+      run: cp discover.json "$RUNNER_TEMP/discover.json"

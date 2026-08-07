@@ -1,0 +1,150 @@
+name: icpc-verify
+on:
+  workflow_call:
+    inputs:
+      full:
+        type: boolean
+        default: false
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      problem-dir:
+        type: string
+        default: "."
+      judge-image:
+        type: string
+        default: ""
+      judge-all:
+        type: boolean
+        default: false
+      verdict-match:
+        type: string
+        default: exact
+      max-parallel:
+        type: number
+        default: 0
+      solutions-filter:
+        type: string
+        default: ""
+      default-time-limit:
+        type: number
+        default: 1
+      default-memory-mib:
+        type: number
+        default: 2048
+      timelimit-overshoot:
+        type: string
+        default: "2s|20%"
+      output-limit-mib:
+        type: number
+        default: 8
+      required-cpu-flags:
+        type: string
+        default: avx2
+      judge-cpu:
+        type: string
+        default: ""
+      offline-sibling:
+        type: boolean
+        default: true
+      diff-max-cases:
+        type: number
+        default: 3
+      diff-max-bytes:
+        type: number
+        default: 4096
+      compile-flags-cpp:
+        type: string
+        default: ""
+      compile-flags-c:
+        type: string
+        default: ""
+      compile-flags-java:
+        type: string
+        default: ""
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.d.outputs.matrix }}
+      count: ${{ steps.d.outputs.count }}
+      problem: ${{ steps.d.outputs.problem }}
+      verifier-ref: ${{ steps.ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: ref
+        shell: bash
+        run: |
+          # github.workflow_ref 예: suckzoo/problem-verifier/.github/workflows/verify.yml@refs/heads/main
+          ref="${{ github.workflow_ref }}"
+          echo "ref=${ref##*@}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: suckzoo/problem-verifier
+          ref: ${{ steps.ref.outputs.ref }}
+          path: .icpc-verifier
+      - id: d
+        uses: ./.icpc-verifier/discover
+        with:
+          problem-dir: ${{ inputs.problem-dir }}
+          full: ${{ inputs.full }}
+          solutions-filter: ${{ inputs.solutions-filter }}
+          default-time-limit: ${{ inputs.default-time-limit }}
+          default-memory-mib: ${{ inputs.default-memory-mib }}
+
+  judge:
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    runs-on: ${{ inputs.runs-on }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max-parallel > 0 && inputs.max-parallel || 256 }}
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: suckzoo/problem-verifier
+          ref: ${{ needs.discover.outputs.verifier-ref }}
+          path: .icpc-verifier
+      - uses: ./.icpc-verifier/judge
+        with:
+          problem-dir: ${{ inputs.problem-dir }}
+          solution: ${{ matrix.path }}
+          name: ${{ matrix.name }}
+          judge-image: ${{ inputs.judge-image }}
+          judge-all: ${{ inputs.judge-all }}
+          verdict-match: ${{ inputs.verdict-match }}
+          default-time-limit: ${{ inputs.default-time-limit }}
+          default-memory-mib: ${{ inputs.default-memory-mib }}
+          timelimit-overshoot: ${{ inputs.timelimit-overshoot }}
+          output-limit-mib: ${{ inputs.output-limit-mib }}
+          required-cpu-flags: ${{ inputs.required-cpu-flags }}
+          judge-cpu: ${{ inputs.judge-cpu }}
+          offline-sibling: ${{ inputs.offline-sibling }}
+          diff-max-cases: ${{ inputs.diff-max-cases }}
+          diff-max-bytes: ${{ inputs.diff-max-bytes }}
+          compile-flags-cpp: ${{ inputs.compile-flags-cpp }}
+          compile-flags-c: ${{ inputs.compile-flags-c }}
+          compile-flags-java: ${{ inputs.compile-flags-java }}
+
+  report:
+    needs: [discover, judge]
+    if: always() && needs.discover.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: suckzoo/problem-verifier
+          ref: ${{ needs.discover.outputs.verifier-ref }}
+          path: .icpc-verifier
+      - uses: ./.icpc-verifier/report
+        with:
+          problem: ${{ needs.discover.outputs.problem }}
+          expected-matrix: ${{ needs.discover.outputs.matrix }}
+          verdict-match: ${{ inputs.verdict-match }}
+          problem-dir: ${{ inputs.problem-dir }}

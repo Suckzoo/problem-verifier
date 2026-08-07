@@ -119,4 +119,15 @@ def test_result_json_shape(tmp_path):
         "hard_kill",
     }
     case = payload["testcases"][0]
-    assert set(case) == {"id", "group", "verdict", "wall", "cpu", "mem_kib", "exit_code", "message"}
+    assert set(case) == {
+        "id",
+        "group",
+        "verdict",
+        "wall",
+        "cpu",
+        "mem_kib",
+        "exit_code",
+        "message",
+        "expected_excerpt",
+        "actual_excerpt",
+    }

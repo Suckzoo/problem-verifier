@@ -6,6 +6,7 @@ import argparse
 import dataclasses
 import json
 import platform
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -19,8 +20,10 @@ from .cpu import (
     read_cpu_flags,
     read_topology,
 )
+from .discover import build_matrix, changed_solution_units, decide_scope
 from .judge import JudgeOptions, judge_solution, measure_machine_factor
 from .problemcfg import ProblemConfigError, load_problem_config
+from .report import generate_report
 from .results import matches_expectation
 from .solutions import Language, discover_solutions
 from .testdata import TestDataError, collect_testcases
@@ -52,6 +55,28 @@ def build_parser() -> argparse.ArgumentParser:
     judge.add_argument("--compile-flags-cpp", default="")
     judge.add_argument("--compile-flags-c", default="")
     judge.add_argument("--compile-flags-java", default="")
+    judge.add_argument("--diff-max-cases", type=int, default=3)
+    judge.add_argument("--diff-max-bytes", type=int, default=4096)
+
+    discover = sub.add_parser("discover", help="채점 대상을 결정한다")
+    discover.add_argument("--problem-dir", type=Path, default=Path("."))
+    discover.add_argument("--output", type=Path, required=True)
+    discover.add_argument("--full", action="store_true")
+    discover.add_argument("--event-name", default="")
+    discover.add_argument("--before", default="")
+    discover.add_argument("--head", default="")
+    discover.add_argument("--base-ref", default="")
+    discover.add_argument("--solutions-filter", default="")
+    discover.add_argument("--default-time-limit", type=float, default=1.0)
+    discover.add_argument("--default-memory-mib", type=int, default=2048)
+
+    report_p = sub.add_parser("report", help="result.json 들을 병합해 리포트를 만든다")
+    report_p.add_argument("--results-dir", type=Path, required=True)
+    report_p.add_argument("--problem", type=Path, required=True)
+    report_p.add_argument("--summary-out", type=Path, required=True)
+    report_p.add_argument("--html-out", type=Path, required=True)
+    report_p.add_argument("--expected-matrix", type=Path, default=None)
+    report_p.add_argument("--verdict-match", choices=["exact", "any-rejected"], default="exact")
     return parser
 
 
@@ -106,6 +131,8 @@ def run_judge(args: argparse.Namespace) -> int:
         machine_factor=machine_factor,
         cpu_isolated=cpu_plan.isolated,
         warnings=all_warnings,
+        diff_max_cases=args.diff_max_cases,
+        diff_max_bytes=args.diff_max_bytes,
     )
 
     with tempfile.TemporaryDirectory(prefix="icpc-judge-") as tmp:
@@ -130,11 +157,132 @@ def run_judge(args: argparse.Namespace) -> int:
     return EXIT_OK if payload["expectation_met"] else EXIT_MISMATCH
 
 
+def _git_changed_files(args: argparse.Namespace) -> list[str] | None:
+    """diff 를 계산한다. 못 하면 None (전체 fallback)."""
+
+    def diff(base: str, head: str) -> list[str] | None:
+        proc = subprocess.run(
+            ["git", "diff", "--name-only", base, head],
+            capture_output=True,
+            text=True,
+            cwd=args.problem_dir,
+        )
+        if proc.returncode != 0:
+            return None
+        return [line for line in proc.stdout.splitlines() if line]
+
+    if args.event_name == "pull_request" and args.base_ref:
+        merge_base = subprocess.run(
+            ["git", "merge-base", f"origin/{args.base_ref}", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=args.problem_dir,
+        )
+        if merge_base.returncode != 0:
+            return None
+        return diff(merge_base.stdout.strip(), "HEAD")
+
+    if args.event_name == "push" and args.before and args.head:
+        if set(args.before) == {"0"}:
+            return None
+        return diff(args.before, args.head)
+
+    return None
+
+
+def run_discover(args: argparse.Namespace) -> int:
+    problem_dir = args.problem_dir.resolve()
+    config = load_problem_config(
+        problem_dir,
+        default_time_limit=args.default_time_limit,
+        default_memory_mib=args.default_memory_mib,
+    )
+    collect_testcases(problem_dir)  # data/ 짝 검사를 discover 단계에서 수행한다
+
+    repo_root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        cwd=problem_dir,
+    )
+    if repo_root.returncode == 0:
+        problem_dir_rel = str(problem_dir.relative_to(Path(repo_root.stdout.strip()))).replace(
+            "\\", "/"
+        )
+        if problem_dir_rel == ".":
+            problem_dir_rel = ""
+    else:
+        problem_dir_rel = ""
+
+    changed = _git_changed_files(args)
+    full, reason = decide_scope(
+        full_flag=args.full,
+        event_name=args.event_name,
+        changed_files=changed,
+        problem_dir_rel=problem_dir_rel,
+    )
+    changed_units = changed_solution_units(changed, problem_dir_rel) if changed else set()
+
+    solutions, warnings = discover_solutions(problem_dir, filter_glob=args.solutions_filter)
+    matrix = build_matrix(solutions, full=full, changed_units=changed_units)
+
+    payload = {
+        "matrix": matrix,
+        "count": len(matrix),
+        "full": full,
+        "reason": reason,
+        "problem": {
+            "name": config.name,
+            "time_limit": config.time_limit,
+            "memory_mib": config.memory_mib,
+            "time_multiplier": config.time_multiplier,
+            "validation": config.validation.value,
+        },
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    print(f"discover: {len(matrix)}개 대상 ({reason})")
+    return EXIT_OK
+
+
+def run_report(args: argparse.Namespace) -> int:
+    results = []
+    for path in sorted(args.results_dir.rglob("result*.json")):
+        results.append(json.loads(path.read_text(encoding="utf-8")))
+    problem = json.loads(args.problem.read_text(encoding="utf-8"))
+    if "problem" in problem:  # discover.json 전체를 넘겨도 동작한다
+        problem = problem["problem"]
+    expected_matrix = None
+    if args.expected_matrix and args.expected_matrix.is_file():
+        loaded = json.loads(args.expected_matrix.read_text(encoding="utf-8"))
+        expected_matrix = loaded["matrix"] if "matrix" in loaded else loaded
+
+    outcome = generate_report(
+        results, problem, expected_matrix=expected_matrix, verdict_match=args.verdict_match
+    )
+    args.summary_out.parent.mkdir(parents=True, exist_ok=True)
+    args.summary_out.write_text(outcome.markdown, encoding="utf-8")
+    args.html_out.parent.mkdir(parents=True, exist_ok=True)
+    args.html_out.write_text(outcome.html, encoding="utf-8")
+
+    for failure in outcome.failures:
+        print(f"FAIL: {failure}", file=sys.stderr)
+    print(f"report: {len(results)}개 결과, {'통과' if outcome.passed else '실패'}")
+    return EXIT_OK if outcome.passed else EXIT_MISMATCH
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "judge":
             return run_judge(args)
+        if args.command == "discover":
+            return run_discover(args)
+        if args.command == "report":
+            return run_report(args)
     except (ProblemConfigError, TestDataError, CpuError, OvershootSpecError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_CONFIG

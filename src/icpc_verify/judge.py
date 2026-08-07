@@ -36,6 +36,14 @@ RUN_MOUNT = "/run"
 OUT_MOUNT = "/out"
 WORK_MOUNT = "/work"
 STDERR_KEEP_BYTES = 8 * 1024
+EXCERPT_TRUNCATION_MARK = "\n… (잘림)"
+
+
+def _make_excerpt(data: bytes, cap: int) -> str:
+    text = data[:cap].decode("utf-8", errors="replace")
+    if len(data) > cap:
+        text += EXCERPT_TRUNCATION_MARK
+    return text
 
 
 @dataclass
@@ -49,6 +57,8 @@ class JudgeOptions:
     machine_factor: float = 1.0
     cpu_isolated: bool = False
     warnings: list[str] = field(default_factory=list)
+    diff_max_cases: int = 3
+    diff_max_bytes: int = 4096
 
 
 def measure_machine_factor(image: str, cpuset: int, rounds: int = 3) -> float:
@@ -388,6 +398,7 @@ def judge_solution(
         else None
     )
     stopped = False
+    excerpts_taken = 0
     for case in testcases:
         if stopped:
             result.testcases.append(
@@ -488,18 +499,27 @@ def judge_solution(
         if stderr_text and verdict == verdicts.RUN_TIME_ERROR:
             message = f"{message}\nstderr: {stderr_text}"
 
-        result.testcases.append(
-            TestCaseResult(
-                id=case.id,
-                group=case.group,
-                verdict=verdict,
-                wall=measurement.wall,
-                cpu=measurement.cpu,
-                mem_kib=measurement.max_rss_kib,
-                exit_code=measurement.exit_code,
-                message=message,
-            )
+        case_result = TestCaseResult(
+            id=case.id,
+            group=case.group,
+            verdict=verdict,
+            wall=measurement.wall,
+            cpu=measurement.cpu,
+            mem_kib=measurement.max_rss_kib,
+            exit_code=measurement.exit_code,
+            message=message,
         )
+        if (
+            validator is None
+            and verdict == verdicts.WRONG_ANSWER
+            and excerpts_taken < options.diff_max_cases
+        ):
+            excerpts_taken += 1
+            case_result.expected_excerpt = _make_excerpt(
+                case.answer_path.read_bytes(), options.diff_max_bytes
+            )
+            case_result.actual_excerpt = _make_excerpt(team_output, options.diff_max_bytes)
+        result.testcases.append(case_result)
         if verdict != verdicts.ACCEPTED and not options.judge_all:
             stopped = True
 
