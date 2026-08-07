@@ -1,0 +1,52 @@
+name: icpc-verify report
+description: 결과를 병합해 Job Summary 와 HTML 리포트를 발행한다
+inputs:
+  problem:
+    required: true
+  expected-matrix:
+    default: ""
+  verdict-match:
+    default: "exact"
+outputs:
+  passed:
+    value: ${{ steps.gen.outputs.passed }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - shell: bash
+      run: python -m pip install --quiet "${{ github.action_path }}/.."
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: icpc-verify-result-*
+        path: results
+    - id: gen
+      shell: bash
+      env:
+        PROBLEM_JSON: ${{ inputs.problem }}
+        MATRIX_JSON: ${{ inputs.expected-matrix }}
+      run: |
+        set -eu
+        printf '%s' "$PROBLEM_JSON" > problem.json
+        if [ -n "$MATRIX_JSON" ]; then
+          printf '%s' "$MATRIX_JSON" > matrix.json
+          extra=(--expected-matrix matrix.json)
+        else
+          extra=()
+        fi
+        status=0
+        icpc-verify report --results-dir results --problem problem.json \
+          --summary-out summary.md --html-out index.html \
+          --verdict-match "${{ inputs.verdict-match }}" "${extra[@]}" || status=$?
+        cat summary.md >> "$GITHUB_STEP_SUMMARY"
+        if [ "$status" -eq 0 ]; then echo "passed=true" >> "$GITHUB_OUTPUT";
+        else echo "passed=false" >> "$GITHUB_OUTPUT"; fi
+        echo "status=$status" >> "$GITHUB_ENV"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: icpc-verify-report
+        path: index.html
+    - shell: bash
+      run: exit "$status"
