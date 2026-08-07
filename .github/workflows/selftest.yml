@@ -30,16 +30,50 @@ jobs:
     with:
       problem-dir: tests/fixtures/interactive
       full: true
+  # mislabeled 는 verify 가 잡아내서 실패하는 게 기대 결과다. 그런데 GitHub Actions는
+  # `uses: <reusable workflow>` 로 부른 job 에는 continue-on-error 를 못 붙인다
+  # (parse 단계에서 거부된다 — CI 에서 직접 확인했다). 그래서 이 job 은 verify.yml 을
+  # 통째로 부르는 대신, discover/judge/report action 3개를 직접 조립해서
+  # (README/spec 이 명시적으로 지원한다고 밝힌 사용법이다) 같은 job 안에서 돌리고,
+  # report 실패만 continue-on-error 로 삼킨 뒤 마지막 step 이 "정말 잡아냈는지"를
+  # 직접 판정한다. 이러면 이 job 의 result 는 검증 로직이 제대로 작동했을 때만
+  # success 다 — assert 는 나머지 넷과 똑같이 취급하면 된다.
   mislabeled:
-    uses: ./.github/workflows/verify.yml
-    # mislabeled 는 verify 가 잡아내서 실패하는 게 기대 결과다. 그 기대된 실패가
-    # selftest 전체 run 을 계속 빨갛게 만들면 신호로서 쓸모가 없어지므로(branch
-    # protection 이 영영 막힌다), 이 job 의 실패는 삼키고 assert 가 job output
-    # 으로 직접 확인한다.
-    continue-on-error: true
-    with:
-      problem-dir: tests/fixtures/mislabeled
-      full: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: discover
+        uses: ./discover
+        with:
+          problem-dir: tests/fixtures/mislabeled
+          full: true
+      - id: judge
+        if: steps.discover.outputs.count != '0'
+        uses: ./judge
+        with:
+          problem-dir: tests/fixtures/mislabeled
+          solution: ${{ fromJSON(steps.discover.outputs.matrix)[0].path }}
+          name: ${{ fromJSON(steps.discover.outputs.matrix)[0].name }}
+      - id: report
+        if: always()
+        continue-on-error: true
+        uses: ./report
+        with:
+          problem: ${{ steps.discover.outputs.problem }}
+          expected-matrix: ${{ steps.discover.outputs.matrix }}
+          problem-dir: tests/fixtures/mislabeled
+      - shell: bash
+        run: |
+          set -eu
+          passed="${{ steps.report.outputs.passed }}"
+          echo "mislabeled report passed=$passed (기대: false)"
+          if [ "$passed" != "false" ]; then
+            echo "::error::mislabeled 이 기대한 실패를 잡아내지 못했습니다 (passed=$passed)"
+            exit 1
+          fi
+          echo "mislabeled: 기대대로 실패를 잡아냈습니다 (오탐 방어 확인)"
 
   assert:
     needs: [plain, float, custom, interactive, mislabeled]
@@ -59,12 +93,9 @@ jobs:
               echo "selftest $name: $got (기대대로)"
             fi
           }
-          # continue-on-error 아래에서는 needs.mislabeled.result 가 무엇을
-          # 보고하는지 CI 에서 실측하려고 둘 다 남긴다.
-          echo "debug: mislabeled.result=${{ needs.mislabeled.result }} mislabeled.outputs.passed=${{ needs.mislabeled.outputs.passed }}"
-          check plain       "${{ needs.plain.result }}"              success
-          check float       "${{ needs.float.result }}"              success
-          check custom      "${{ needs.custom.result }}"             success
-          check interactive "${{ needs.interactive.result }}"        success
-          check mislabeled  "${{ needs.mislabeled.outputs.passed }}" "false"
+          check plain       "${{ needs.plain.result }}"       success
+          check float       "${{ needs.float.result }}"       success
+          check custom      "${{ needs.custom.result }}"      success
+          check interactive "${{ needs.interactive.result }}" success
+          check mislabeled  "${{ needs.mislabeled.result }}"  success
           exit "$fail"

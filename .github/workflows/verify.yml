@@ -62,9 +62,6 @@ on:
       compile-flags-java:
         type: string
         default: ""
-    outputs:
-      passed:
-        value: ${{ jobs.report.outputs.passed }}
 
 jobs:
   discover:
@@ -139,16 +136,13 @@ jobs:
     needs: [discover, judge]
     if: always() && needs.discover.result == 'success'
     runs-on: ubuntu-latest
-    outputs:
-      passed: ${{ steps.report.outputs.passed }}
     steps:
       - uses: actions/checkout@v4
         with:
           repository: suckzoo/problem-verifier
           ref: ${{ needs.discover.outputs.verifier-ref }}
           path: .icpc-verifier
-      - id: report
-        uses: ./.icpc-verifier/report
+      - uses: ./.icpc-verifier/report
         with:
           problem: ${{ needs.discover.outputs.problem }}
           expected-matrix: ${{ needs.discover.outputs.matrix }}
