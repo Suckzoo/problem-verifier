@@ -37,6 +37,8 @@ class TestCaseResult:
     mem_kib: int
     exit_code: int
     message: str
+    expected_excerpt: str = ""
+    actual_excerpt: str = ""
 
 
 @dataclass

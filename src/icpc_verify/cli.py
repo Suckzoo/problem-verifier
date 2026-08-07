@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     judge.add_argument("--compile-flags-cpp", default="")
     judge.add_argument("--compile-flags-c", default="")
     judge.add_argument("--compile-flags-java", default="")
+    judge.add_argument("--diff-max-cases", type=int, default=3)
+    judge.add_argument("--diff-max-bytes", type=int, default=4096)
 
     discover = sub.add_parser("discover", help="채점 대상을 결정한다")
     discover.add_argument("--problem-dir", type=Path, default=Path("."))
@@ -120,6 +122,8 @@ def run_judge(args: argparse.Namespace) -> int:
         machine_factor=machine_factor,
         cpu_isolated=cpu_plan.isolated,
         warnings=all_warnings,
+        diff_max_cases=args.diff_max_cases,
+        diff_max_bytes=args.diff_max_bytes,
     )
 
     with tempfile.TemporaryDirectory(prefix="icpc-judge-") as tmp:

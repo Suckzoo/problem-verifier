@@ -87,3 +87,11 @@ def test_tle_is_not_killed_before_hard_limit(tmp_path):
 
 def test_machine_factor_is_positive():
     assert measure_machine_factor(IMAGE, 0) > 0
+
+
+def test_wrong_answer_carries_diff_excerpts(tmp_path):
+    result = judge(tmp_path, "wrong_answer/off_by_one.cpp")
+    first = result.testcases[0]
+    assert first.verdict == verdicts.WRONG_ANSWER
+    assert first.expected_excerpt.strip() == "3"
+    assert first.actual_excerpt.strip() == "4"
