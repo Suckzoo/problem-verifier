@@ -147,3 +147,4 @@ jobs:
           problem: ${{ needs.discover.outputs.problem }}
           expected-matrix: ${{ needs.discover.outputs.matrix }}
           verdict-match: ${{ inputs.verdict-match }}
+          problem-dir: ${{ inputs.problem-dir }}

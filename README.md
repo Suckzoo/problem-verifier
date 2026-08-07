@@ -2,8 +2,8 @@
 
 Kattis / DOMjudge 호환 ICPC 문제 package 검증 도구.
 
-계획 2 범위: 로컬 CLI. `validation: default` / `custom` / `custom interactive`
-문제를 모두 채점한다. GitHub Action 통합은 계획 3 이다.
+`validation: default` / `custom` / `custom interactive` 문제를 모두 채점한다.
+GitHub Actions reusable workflow 로 쓰거나, CLI 로 로컬에서 바로 쓸 수 있다.
 
 ## validation 지원
 
@@ -41,11 +41,38 @@ Kattis / DOMjudge 호환 ICPC 문제 package 검증 도구.
 이 도구는 출제자가 자기 문제를 검증하는 용도다. 신뢰하지 않는 제출물을 채점하는
 데 쓰지 말 것.
 
-## 설치
+## 사용
+
+문제 repo 에 아래 workflow 를 두면, push/PR 마다 바뀐 solution 만 (workflow_dispatch
+에서는 전체를) 채점한다.
+
+```yaml
+# .github/workflows/verify.yml
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full: { type: boolean, default: false }
+
+jobs:
+  verify:
+    uses: suckzoo/problem-verifier/.github/workflows/verify.yml@v1
+    with:
+      full: ${{ inputs.full == true }}
+```
+
+`discover` → `judge` (matrix, solution 별 병렬) → `report` 순으로 돈다. 결과는
+Job Summary 와 `icpc-verify-report-*` artifact (단일 파일 `index.html`) 로 남는다.
+전체 input 목록은 [설계 문서 §13.1](docs/superpowers/specs/2026-07-31-icpc-problem-verifier-design.md)
+을 본다. `discover`/`judge`/`report` action 3개를 직접 조립해 쓰는 것도 지원한다 —
+이 reusable workflow는 그 조립을 미리 해둔 것이다.
+
+### 로컬 사용
 
     python -m pip install -e .
 
-## judge image 준비
+judge image 준비:
 
     set -a && . image/python39.env && set +a
     docker build --platform linux/amd64 \
@@ -53,14 +80,16 @@ Kattis / DOMjudge 호환 ICPC 문제 package 검증 도구.
       -t icpc-judge:test image/
     echo "icpc-judge:test" > image/IMAGE_DIGEST
 
-## 사용
+solution 하나를 채점:
 
     icpc-verify judge \
       --problem-dir path/to/problem \
       --solution accepted/main.cpp \
       --output result.json
 
-exit code 는 기대와 실제가 같으면 0, 다르면 1, 설정 오류면 2 다.
+exit code 는 기대와 실제가 같으면 0, 다르면 1, 설정 오류면 2 다. `discover`/`report`
+도 같은 방식으로 CLI 에서 바로 부를 수 있다 (`icpc-verify discover`, `icpc-verify
+report`) — action 은 이 CLI 를 감싼 얇은 껍질이다.
 
 ## 요구 사항
 

@@ -1,0 +1,62 @@
+name: selftest
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  plain:
+    uses: ./.github/workflows/verify.yml
+    with:
+      problem-dir: tests/fixtures/plain
+      full: true
+  float:
+    uses: ./.github/workflows/verify.yml
+    with:
+      problem-dir: tests/fixtures/float
+      full: true
+  custom:
+    uses: ./.github/workflows/verify.yml
+    with:
+      problem-dir: tests/fixtures/custom
+      full: true
+  interactive:
+    uses: ./.github/workflows/verify.yml
+    with:
+      problem-dir: tests/fixtures/interactive
+      full: true
+  mislabeled:
+    uses: ./.github/workflows/verify.yml
+    with:
+      problem-dir: tests/fixtures/mislabeled
+      full: true
+
+  assert:
+    needs: [plain, float, custom, interactive, mislabeled]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          set -eu
+          fail=0
+          check() {
+            name=$1; got=$2; want=$3
+            if [ "$got" != "$want" ]; then
+              echo "::error::selftest $name: 결과 $got, 기대 $want"
+              fail=1
+            else
+              echo "selftest $name: $got (기대대로)"
+            fi
+          }
+          check plain       "${{ needs.plain.result }}"       success
+          check float       "${{ needs.float.result }}"       success
+          check custom      "${{ needs.custom.result }}"      success
+          check interactive "${{ needs.interactive.result }}" success
+          check mislabeled  "${{ needs.mislabeled.result }}"  failure
+          exit "$fail"
