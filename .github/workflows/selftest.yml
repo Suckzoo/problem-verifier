@@ -32,6 +32,11 @@ jobs:
       full: true
   mislabeled:
     uses: ./.github/workflows/verify.yml
+    # mislabeled 는 verify 가 잡아내서 실패하는 게 기대 결과다. 그 기대된 실패가
+    # selftest 전체 run 을 계속 빨갛게 만들면 신호로서 쓸모가 없어지므로(branch
+    # protection 이 영영 막힌다), 이 job 의 실패는 삼키고 assert 가 job output
+    # 으로 직접 확인한다.
+    continue-on-error: true
     with:
       problem-dir: tests/fixtures/mislabeled
       full: true
@@ -54,9 +59,12 @@ jobs:
               echo "selftest $name: $got (기대대로)"
             fi
           }
-          check plain       "${{ needs.plain.result }}"       success
-          check float       "${{ needs.float.result }}"       success
-          check custom      "${{ needs.custom.result }}"      success
-          check interactive "${{ needs.interactive.result }}" success
-          check mislabeled  "${{ needs.mislabeled.result }}"  failure
+          # continue-on-error 아래에서는 needs.mislabeled.result 가 무엇을
+          # 보고하는지 CI 에서 실측하려고 둘 다 남긴다.
+          echo "debug: mislabeled.result=${{ needs.mislabeled.result }} mislabeled.outputs.passed=${{ needs.mislabeled.outputs.passed }}"
+          check plain       "${{ needs.plain.result }}"              success
+          check float       "${{ needs.float.result }}"              success
+          check custom      "${{ needs.custom.result }}"             success
+          check interactive "${{ needs.interactive.result }}"        success
+          check mislabeled  "${{ needs.mislabeled.outputs.passed }}" "false"
           exit "$fail"
